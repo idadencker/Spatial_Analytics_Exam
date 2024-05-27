@@ -8,3 +8,468 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
+
+```{r}
+# Install needed packages
+pacman::p_load(sf, tidyverse, tmap, mapboxapi, leaflet, units, htmlwidgets)
+```
+
+
+```{r}
+# Load in playgrounds data
+play_aar <- st_read("/Users/idahelenedencker/Desktop/CognitiveScience/6. semester/Spatial analytics/Exam/spatial_exam_git/data/aarhus/playgrounds4326.shp")
+
+play_cop <- st_read("/Users/idahelenedencker/Desktop/CognitiveScience/6. semester/Spatial analytics/Exam/spatial_exam_git/data/copenhagen/legeplads.shp", options = "ENCODING=WINDOWS-1252") 
+
+play_vest <- st_read("/Users/idahelenedencker/Desktop/CognitiveScience/6. semester/Spatial analytics/Exam/spatial_exam_git/data/vesthimmerland/legepladser-vesthimmerland.geojson")
+play_vest <- play_vest %>%
+  mutate(across(where(is.character), ~ iconv(., from = "UTF-8", to = "WINDOWS-1252")))
+
+play_ring <- st_read("/Users/idahelenedencker/Desktop/CognitiveScience/6. semester/Spatial analytics/Exam/spatial_exam_git/data/ringkøbing-skjern/ringkøbing-skjern.geojson")
+
+
+# Check CRS
+st_crs(play_aar) #is NA
+st_crs(play_cop) #is WGS84
+st_crs(play_vest) #is WGS84
+st_crs(play_ring) #is WGS84
+
+
+# Transforming all CRS to WGS84
+# Change play_aar to WGS84
+play_aar <- st_set_crs(play_aar, 4326) %>% st_transform(crs = 4326)
+
+
+# Check CRS again
+st_crs(play_aar) #is WGS84
+st_crs(play_cop) #is WGS84
+st_crs(play_vest) #is WGS84
+st_crs(play_ring) #is WGS84
+
+
+# Read in municipalities data 
+municipalities <- readRDS("/Users/idahelenedencker/Desktop/CognitiveScience/6. semester/Spatial analytics/Exam/spatial_exam_git/data/municipalities.rds")
+```
+
+
+
+```{r}
+# Calculate the number of playgrounds per family
+
+# Read in families CSV
+families <- read.csv("/Users/idahelenedencker/Desktop/CognitiveScience/6. semester/Spatial analytics/Exam/spatial_exam_git/data/families.csv", sep = ";")
+
+# Filter 
+families <- families %>%
+  filter(OMRÅDE %in% c('København', 'Ringkøbing-Skjern', 'Aarhus', 'Vesthimmerlands')) %>%
+  filter(TID == 2024) %>%
+  rename(
+    n_families = INDHOLD, 
+    Year = TID, 
+    Municipality = OMRÅDE, 
+    child_min_age = BOERNALD, 
+    child_max_age = BOERNAL1
+  ) %>%
+  dplyr::select(-ENHED)
+
+# Add the count of playgrounds and calculate playgrounds per family 
+families <- families %>%
+  mutate(Number_of_playgrounds = case_when(
+    Municipality == 'København' ~ nrow(play_cop),
+    Municipality == 'Aarhus' ~ nrow(play_aar),
+    Municipality == 'Ringkøbing-Skjern' ~ nrow(play_ring),  
+    Municipality == 'Vesthimmerlands' ~ nrow(play_vest)  
+  )) %>%
+  mutate(playgrounds_per_family = case_when(
+    Municipality == 'København' ~ Number_of_playgrounds / n_families,
+    Municipality == 'Aarhus' ~ Number_of_playgrounds / n_families,
+    Municipality == 'Ringkøbing-Skjern' ~ Number_of_playgrounds / n_families,  
+    Municipality == 'Vesthimmerlands' ~ Number_of_playgrounds / n_families  
+  ))
+
+
+```
+
+
+```{r}
+# Plotting all the playgrounds on top of the municipalities borders
+
+# As static map 
+tm_shape(municipalities) +
+  tm_borders(col = "black", 
+             lwd = 1) +
+  tm_layout(main.title = "Denmark municipalities") +
+  tm_shape(play_ring) + 
+    tm_dots(col = "yellow", size = 0.1)+
+  tm_shape(play_aar) + 
+    tm_dots(col = "red", size = 0.1)+
+  tm_shape(play_cop) + 
+    tm_dots(col = "green", size = 0.1)+
+  tm_shape(play_vest) + 
+    tm_dots(col = "blue", size = 0.1)
+
+
+# As leaflet map 
+map1 <- tm_shape(municipalities) +
+  tm_borders(col = "black", 
+             lwd = 1) +
+  tm_layout(main.title = "Denmark municipalities") +
+  tm_shape(play_ring) + 
+    tm_dots(col = "yellow", size = 0.1)+
+  tm_shape(play_aar) + 
+    tm_dots(col = "red", size = 0.1)+
+  tm_shape(play_cop) + 
+    tm_dots(col = "green", size = 0.1)+
+  tm_shape(play_vest) + 
+    tm_dots(col = "blue", size = 0.1)
+
+lf <- tmap_leaflet(map1)
+lf
+
+```
+
+
+```{r}
+# Make isochrone data
+play_iso_walk_aar <- mb_isochrone(play_aar,
+                                 profile = "walking",
+                                 time = c(5, 10, 15))
+
+play_iso_walk_cop <- mb_isochrone(play_cop,
+                                 profile = "walking",
+                                 time = c(5, 10, 15))
+
+play_iso_walk_ring <- mb_isochrone(play_ring,
+                                 profile = "walking",
+                                 time = c(5, 10, 15))
+
+play_iso_walk_vest <- mb_isochrone(play_vest,
+                                 profile = "walking",
+                                 time = c(5, 10, 15))
+```
+
+
+```{r}
+# Set colors for isochrones
+colors <- c('red','blue','green')
+
+# Set fill colors for municipalities of interest 
+municipality_colors <- c(
+  "Århus" = "#FF5733",          
+  "København" = "#FF5733",      
+  "Ringkøbing-Skjern" = "#3357FF",
+  "Vesthimmerland" = "#3357FF")
+
+# All municipalities expect the 4 of interest will be transparent
+municipalities$color <- ifelse(
+  municipalities$NAME_2 %in% names(municipality_colors),
+  municipality_colors[municipalities$NAME_2],
+  "transparent")
+
+# Make leaflet map
+m <- leaflet() %>%
+  addMapboxTiles(style_id = "outdoors-v11",
+                 username = "mapbox") %>%
+  addPolygons(data = play_iso_walk_aar, 
+              color = rev(colors),
+              fillColor = rev(colors),
+              fillOpacity = 0.5, 
+              opacity = 0.5, 
+              weight = 0.2) %>% 
+  addPolygons(data = play_iso_walk_cop, 
+              color = rev(colors),
+              fillColor = rev(colors),
+              fillOpacity = 0.5, 
+              opacity = 0.5, 
+              weight = 0.2) %>% 
+  addPolygons(data = play_iso_walk_ring, 
+              color = rev(colors),
+              fillColor = rev(colors),
+              fillOpacity = 0.5, 
+              opacity = 0.5, 
+              weight = 0.2) %>% 
+  addPolygons(data = play_iso_walk_vest, 
+              color = rev(colors),
+              fillColor = rev(colors),
+              fillOpacity = 0.5, 
+              opacity = 0.5, 
+              weight = 0.2) %>% 
+  addPolygons(data = municipalities, 
+              color = "black",
+              fillColor = ~color,
+              fillOpacity = 0.3,  
+              opacity = 0.5, 
+              weight = 1) %>% 
+  addLegend(labels = c(5, 10, 15),
+            colors = colors,
+            title = "Walking-time<br/>from playgrounds (min)")
+
+m
+
+```
+
+
+
+```{r}
+# Isochrones cut off by borders
+
+# Ensure the play_iso and municipalities data are sf objects and transform them to WGS84
+play_iso_walk_aar <- st_as_sf(play_iso_walk_aar) %>% st_transform(crs = 4326)
+play_iso_walk_cop <- st_as_sf(play_iso_walk_cop) %>% st_transform(crs = 4326)
+play_iso_walk_ring <- st_as_sf(play_iso_walk_ring) %>% st_transform(crs = 4326)
+play_iso_walk_vest <- st_as_sf(play_iso_walk_vest) %>% st_transform(crs = 4326)
+municipalities <- st_as_sf(municipalities) %>% st_transform(crs = 4326)
+
+# Clip isochrones by municipalities' borders
+play_iso_walk_aar_clipped <- st_intersection(play_iso_walk_aar, municipalities)
+play_iso_walk_ring_clipped <- st_intersection(play_iso_walk_ring, municipalities)
+play_iso_walk_vest_clipped <- st_intersection(play_iso_walk_vest, municipalities)
+
+# Handle Copenhagen separately due to disjoint polygons
+cop_muni <- municipalities %>% filter(NAME_2 == "København")
+play_iso_walk_cop_clipped <- st_intersection(play_iso_walk_cop, cop_muni)
+
+# Set colors for isochrones
+colors <- c('red','blue','green')
+
+# Set fill colors for municipalities of interest 
+municipality_colors <- c(
+  "Århus" = "#FF5733",          
+  "København" = "#FF5733",      
+  "Ringkøbing-Skjern" = "#3357FF",
+  "Vesthimmerland" = "#3357FF")
+
+# All municipalities expect the 4 of interest will be transparent
+municipalities$color <- ifelse(
+  municipalities$NAME_2 %in% names(municipality_colors),
+  municipality_colors[municipalities$NAME_2],
+  "transparent")
+
+# Make leaflet map
+m_2 <- leaflet() %>%
+  addMapboxTiles(style_id = "outdoors-v11",
+                 username = "mapbox") %>%
+  addPolygons(data = play_iso_walk_aar_clipped, 
+              color = rev(colors),
+              fillColor = rev(colors),
+              fillOpacity = 0.5, 
+              opacity = 0.5, 
+              weight = 0.2) %>% 
+  addPolygons(data = play_iso_walk_cop_clipped, 
+              color = rev(colors),
+              fillColor = rev(colors),
+              fillOpacity = 0.5, 
+              opacity = 0.5, 
+              weight = 0.2) %>% 
+  addPolygons(data = play_iso_walk_ring_clipped, 
+              color = rev(colors),
+              fillColor = rev(colors),
+              fillOpacity = 0.5, 
+              opacity = 0.5, 
+              weight = 0.2) %>% 
+  addPolygons(data = play_iso_walk_vest_clipped, 
+              color = rev(colors),
+              fillColor = rev(colors),
+              fillOpacity = 0.5, 
+              opacity = 0.5, 
+              weight = 0.2) %>% 
+  addPolygons(data = municipalities, 
+              color = "black",
+              fillColor = ~color,
+              fillOpacity = 0.3,  
+              opacity = 0.5, 
+              weight = 1) %>% 
+  addLegend(labels = c(5, 10, 15),
+            colors = colors,
+            title = "Walking-time<br/>from playgrounds (min)")
+
+m_2
+
+```
+
+
+```{r}
+# Save html of leaflet map
+webshot::install_phantomjs()
+saveWidget(m_2, "Playgrounds_map.html", selfcontained = FALSE) 
+
+```
+
+
+
+
+```{r}
+# Calculating areal % for all 4 municipalities (not automated)
+
+
+## MAKE A DF WITH MUNICIPALITIES OF INTEREST ##
+
+# Make municipalities as sf
+municipalities_sf <- st_as_sf(municipalities)
+# Filter only municipalities of interest
+municipalities_interest <- municipalities_sf %>% 
+  filter(NAME_2 %in% names(municipality_colors))
+# Calculate total areas for each municipality
+municipalities_interest <- municipalities_interest %>% 
+  mutate(total_area_m2 = st_area(geometry)) 
+# remove 'm^2 from total_area_m2
+municipalities_interest$total_area_m2 <- substr(municipalities_interest$total_area_m2, 1, nchar(municipalities_interest$total_area_m2) - 5)        
+# Convert to km2
+municipalities_interest <- municipalities_interest %>% 
+  mutate(total_area_m2 = as.integer(total_area_m2)) %>%
+  mutate(total_area_km2 = total_area_m2/1000000) #these total_area_km2 are in (approx) accordance with google searches of area
+
+
+## FOR VESTHIMMERLAND ##
+
+# Saving km2 for Vesthimmerland 
+vest_area <- municipalities_interest %>%
+  filter(NAME_2 == 'Vesthimmerland') %>%
+  pull(total_area_km2) %>%
+  as.numeric()
+# Make clipped isochrone as sf
+play_iso_walk_vest_sf <- st_as_sf(play_iso_walk_vest_clipped)
+# Take only the 15 min polygons (the biggest ones)
+play_iso_walk_vest_sf <- play_iso_walk_vest_sf %>% 
+  filter(time == 15)
+# Performs union of all these polygons 
+play_iso_walk_vest_sf_union <- st_union(play_iso_walk_vest_sf)
+# Check if valid
+st_is_valid(play_iso_walk_vest_sf_union)
+# Make a new union with the valid sf
+play_iso_walk_vest_sf_union_valid <- st_make_valid(play_iso_walk_vest_sf_union)
+# Check if new union is valid
+st_is_valid(play_iso_walk_vest_sf_union_valid)
+# Get the area of the 'united polygon'
+total_area_playground_union <- st_area(play_iso_walk_vest_sf_union_valid)
+# Make integer 
+total_area_playground_union_m2 <- as.integer(total_area_playground_union)
+# Make into km2
+total_area_playground_union_km2_vest <- (total_area_playground_union/1000000)
+# Calculate and save percentage
+percentage_covered_vest <- (total_area_playground_union_km2_vest / vest_area) * 100
+# Print percentage 
+drop_units(percentage_covered_vest)
+
+
+
+## FOR RINGKØBING-SKJERN ##
+
+# Saving km2 for Ringkøbing-Skjern 
+ring_area <- municipalities_interest %>%
+  filter(NAME_2 == 'Ringkøbing-Skjern') %>%
+  pull(total_area_km2) %>%
+  as.numeric()
+# Make clipped isochrone as sf
+play_iso_walk_ring_sf <- st_as_sf(play_iso_walk_ring_clipped)
+# Take only the 15 min polygons (the biggest ones)
+play_iso_walk_ring_sf <- play_iso_walk_ring_sf %>% 
+  filter(time == 15)
+# Performs union of all these polygons 
+play_iso_walk_ring_sf_union <- st_union(play_iso_walk_ring_sf)
+# Get the area of the 'united polygon'
+total_area_playground_union <- st_area(play_iso_walk_ring_sf_union)
+# Make integer 
+total_area_playground_union_m2 <- as.integer(total_area_playground_union)
+# Make into km2
+total_area_playground_union_km2_ring <- (total_area_playground_union/1000000)
+# Calculate and save percentage
+percentage_covered_ring <- (total_area_playground_union_km2_ring / ring_area) * 100
+# Print percentage 
+drop_units(percentage_covered_ring)
+
+
+
+## FOR AARHUS ##
+
+# Saving km2 for Aarhus
+aar_area <- municipalities_interest %>%
+  filter(NAME_2 == 'Århus') %>%
+  pull(total_area_km2) %>%
+  as.numeric()
+# Make clipped isochrone as sf
+play_iso_walk_aar_sf <- st_as_sf(play_iso_walk_aar_clipped)
+# Take only the 15 min polygons (the biggest ones)
+play_iso_walk_aar_sf <- play_iso_walk_aar_sf %>% 
+  filter(time == 15)
+# Performs union of all these polygons 
+play_iso_walk_aar_sf_union <- st_union(play_iso_walk_aar_sf)
+# Get the area of the 'united polygon'
+total_area_playground_union <- st_area(play_iso_walk_aar_sf_union)
+# Make integer 
+total_area_playground_union_m2 <- as.integer(total_area_playground_union)
+# Make into km2
+total_area_playground_union_km2_aar <- (total_area_playground_union/1000000)
+# Calculate and save percentage
+percentage_covered_aar <- (total_area_playground_union_km2_aar / vest_area) * 100
+# Print percentage 
+drop_units(percentage_covered_aar)
+
+
+## FOR KØBENHAVN ##
+
+# Saving km2 for København
+cop_area <- municipalities_interest %>%
+  filter(NAME_2 == 'København') %>%
+  pull(total_area_km2) %>%
+  as.numeric()
+# Make isochrone as sf
+play_iso_walk_cop_sf <- st_as_sf(play_iso_walk_cop_clipped)
+# Take only the 15 min polygons (the biggest ones)
+play_iso_walk_cop_sf <- play_iso_walk_cop_sf %>% 
+  filter(time == 15)
+# Performs union of all these polygons 
+play_iso_walk_cop_sf_union <- st_union(play_iso_walk_cop_sf)
+# Check if valid 
+st_is_valid(play_iso_walk_cop_sf_union)
+# Make a new union with the valid sf
+play_iso_walk_cop_sf_union_valid <- st_make_valid(play_iso_walk_cop_sf_union)
+# Check if new union is valid
+st_is_valid(play_iso_walk_cop_sf_union_valid)
+# Get the area of the 'united polygon'
+total_area_playground_union <- st_area(play_iso_walk_cop_sf_union_valid)
+# Make integer 
+total_area_playground_union_m2 <- as.integer(total_area_playground_union)
+# Make into km2
+total_area_playground_union_km2_cop <- (total_area_playground_union/1000000)
+# Calculate and save percentage
+percentage_covered_cop <- (total_area_playground_union_km2_cop / cop_area) * 100
+# Print percentage 
+#OBS: Note that the play_iso_walk_cop_sf_union_valid results is a list of 2 (and not a list of 1). This is because (compared to the other 3 municipalities the geometry of the clipped copenhagen object are multi polygons)
+drop_units(percentage_covered_cop[2])
+
+
+## ASSIGN PERCENTAGES TO FAMILIES DF ##
+
+families <- families %>%
+  mutate(Municipality_area_km2 = case_when(
+    Municipality == 'Vesthimmerlands' ~ vest_area,  
+    Municipality == 'Ringkøbing-Skjern' ~ ring_area,
+    Municipality == 'Aarhus' ~ aar_area,  
+    Municipality == 'København' ~ cop_area  
+  )) %>%
+  mutate(Playgrounds_isochrone_areas_km2 = case_when(
+    Municipality == 'Vesthimmerlands' ~ drop_units(total_area_playground_union_km2_vest),
+    Municipality == 'Ringkøbing-Skjern' ~ drop_units(total_area_playground_union_km2_ring),
+    Municipality == 'Aarhus' ~ drop_units(total_area_playground_union_km2_aar),
+    Municipality == 'København' ~ drop_units(total_area_playground_union_km2_cop[2])
+  )) %>%  
+  mutate(perc_muni_covered = case_when(
+    Municipality == 'Vesthimmerlands' ~ drop_units(percentage_covered_vest),
+    Municipality == 'Ringkøbing-Skjern' ~ drop_units(percentage_covered_ring),
+    Municipality == 'Aarhus' ~ drop_units(percentage_covered_aar),
+    Municipality == 'København' ~ drop_units(percentage_covered_cop[2])
+  ))
+
+# Rounding
+columns_to_round <- c("Municipality_area_km2", "Playgrounds_isochrone_areas_km2", "perc_muni_covered")
+families[columns_to_round] <- lapply(families[columns_to_round], round, digits = 2)
+
+```
+
+```{r}
+# Write families to CSV
+write.csv(families, file = "playgrounds_pr_municipality.csv")
+```
+
