@@ -8,13 +8,13 @@ This project will investigate the accessibility of public playgrounds for four d
 
 ## Repository overview 
 The repository consists of:
-- Playgrounds_map_files folder: created when running the R markdown for visualsing the Leaflet map
+- Playgrounds_map_files folder: generated when running the R Markdown for visualsing the Leaflet map
 - data folder: contains playgrounds data for the four municipalities, municipalities border data and the families data csv loaded via statistikbanken.dk
 - leaflet_muni_data folder: contains saved images from the Leaflet map for the municipalities of interest
 - Playgrounds_map.html: the interactive Leaflet html map visualing the isochrones
 - README.md file
-- Spatial_Analytics_Exam.Rmd: the R markdown containing all code for conducting the analysis
+- Spatial_Analytics_Exam.Rmd: the R Markdown containing all code for conducting the analysis
 - Playgrounds_pr_municipality.csv: the csv containing municipalities data being saved when running the R markdown 
 
 ## Contact
-Questions can be directed to author Ida Dencker at 202104722@uni.au.dk
+Questions can be directed to author Ida Dencker at 202104722@uni.au.dk.
